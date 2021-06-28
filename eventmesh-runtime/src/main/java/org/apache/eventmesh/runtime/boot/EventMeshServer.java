@@ -21,6 +21,7 @@ import org.apache.eventmesh.runtime.common.ServiceState;
 import org.apache.eventmesh.runtime.configuration.EventMeshHTTPConfiguration;
 import org.apache.eventmesh.runtime.configuration.EventMeshTCPConfiguration;
 import org.apache.eventmesh.runtime.constants.EventMeshConstants;
+import org.apache.eventmesh.runtime.trace.Trace;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -38,13 +39,19 @@ public class EventMeshServer {
 
     private ServiceState serviceState;
 
+    private Trace trace;
+
     public EventMeshServer(EventMeshHTTPConfiguration eventMeshHttpConfiguration,
                            EventMeshTCPConfiguration eventMeshTCPConfiguration) {
         this.eventMeshHttpConfiguration = eventMeshHttpConfiguration;
         this.eventMeshTCPConfiguration = eventMeshTCPConfiguration;
+        this.trace = new Trace();
     }
 
     public void init() throws Exception {
+
+        trace.init();
+
         eventMeshHTTPServer = new EventMeshHTTPServer(this, eventMeshHttpConfiguration);
         eventMeshHTTPServer.init();
         eventMeshTCPServer = new EventMeshTCPServer(this, eventMeshTCPConfiguration);
@@ -60,6 +67,8 @@ public class EventMeshServer {
     }
 
     public void start() throws Exception {
+        trace.start();
+
         eventMeshHTTPServer.start();
         if (eventMeshTCPConfiguration != null && eventMeshTCPConfiguration.eventMeshTcpServerEnabled) {
             eventMeshTCPServer.start();
@@ -75,6 +84,9 @@ public class EventMeshServer {
         if (eventMeshTCPConfiguration != null && eventMeshTCPConfiguration.eventMeshTcpServerEnabled) {
             eventMeshTCPServer.shutdown();
         }
+
+        trace.shutdown();
+
         serviceState = ServiceState.STOPED;
         logger.info("server state:{}", serviceState);
     }

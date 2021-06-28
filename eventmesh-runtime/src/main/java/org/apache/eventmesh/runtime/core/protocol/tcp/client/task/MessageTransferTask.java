@@ -19,16 +19,19 @@ package org.apache.eventmesh.runtime.core.protocol.tcp.client.task;
 
 import static org.apache.eventmesh.common.protocol.tcp.Command.RESPONSE_TO_SERVER;
 
+import java.util.Properties;
 import java.util.concurrent.TimeUnit;
 
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
+import io.openmessaging.api.Message;
 import io.openmessaging.api.OnExceptionContext;
 import io.openmessaging.api.SendCallback;
 import io.openmessaging.api.SendResult;
 
 import org.apache.commons.lang3.StringUtils;
+import org.apache.eventmesh.api.trace.LogPointType;
 import org.apache.eventmesh.common.protocol.tcp.Command;
 import org.apache.eventmesh.common.protocol.tcp.EventMeshMessage;
 import org.apache.eventmesh.common.protocol.tcp.Header;
@@ -38,6 +41,7 @@ import org.apache.eventmesh.runtime.boot.EventMeshTCPServer;
 import org.apache.eventmesh.runtime.constants.EventMeshConstants;
 import org.apache.eventmesh.runtime.core.protocol.tcp.client.session.send.EventMeshTcpSendResult;
 import org.apache.eventmesh.runtime.core.protocol.tcp.client.session.send.EventMeshTcpSendStatus;
+import org.apache.eventmesh.runtime.trace.Trace;
 import org.apache.eventmesh.runtime.util.EventMeshUtil;
 import org.apache.eventmesh.runtime.util.Utils;
 import org.slf4j.Logger;
@@ -60,13 +64,16 @@ public class MessageTransferTask extends AbstractTask {
         Command replyCmd = getReplyCmd(cmd);
         Package msg = new Package();
         EventMeshMessage eventMeshMessage = (EventMeshMessage) pkg.getBody();
+        Message openMsg = null;
         int retCode = 0;
+        String retMsg = null;
         EventMeshTcpSendResult sendStatus;
         try {
             if (eventMeshMessage == null) {
                 throw new Exception("eventMeshMessage is null");
             }
 
+            openMsg = EventMeshUtil.decodeMessage(eventMeshMessage);
             if (!cmd.equals(RESPONSE_TO_SERVER) && !eventMeshTCPServer.getRateLimiter().tryAcquire(TRY_PERMIT_TIME_OUT, TimeUnit.MILLISECONDS)) {
                 msg.setHeader(new Header(replyCmd, OPStatus.FAIL.getCode(), "Tps overload, global flow control", pkg.getHeader().getSeq()));
                 ctx.writeAndFlush(msg).addListener(
@@ -85,7 +92,7 @@ public class MessageTransferTask extends AbstractTask {
                 long sendTime = System.currentTimeMillis();
                 addTimestamp(eventMeshMessage, cmd, sendTime);
 
-                sendStatus = session.upstreamMsg(pkg.getHeader(), EventMeshUtil.decodeMessage(eventMeshMessage), createSendCallback(replyCmd, taskExecuteTime, eventMeshMessage), startTime, taskExecuteTime);
+                sendStatus = session.upstreamMsg(pkg.getHeader(), openMsg, createSendCallback(replyCmd, taskExecuteTime, eventMeshMessage), startTime, taskExecuteTime);
 
                 if (StringUtils.equals(EventMeshTcpSendStatus.SUCCESS.name(), sendStatus.getSendStatus().name())) {
                     messageLogger.info("pkg|eventMesh2mq|cmd={}|Msg={}|user={}|wait={}ms|cost={}ms", cmd, EventMeshUtil.printMqMessage
@@ -95,11 +102,19 @@ public class MessageTransferTask extends AbstractTask {
                 }
             }
         } catch (Exception e) {
+            retCode = -1;
+            retMsg = e.toString();
             logger.error("MessageTransferTask failed|cmd={}|Msg={}|user={}|errMsg={}", cmd, eventMeshMessage, session.getClient(), e);
             if (!cmd.equals(RESPONSE_TO_SERVER)) {
                 msg.setHeader(new Header(replyCmd, OPStatus.FAIL.getCode(), e.getStackTrace().toString(), pkg.getHeader()
                         .getSeq()));
                 Utils.writeAndFlush(msg, startTime, taskExecuteTime, session.getContext(), session);
+            }
+        }finally {
+            try{
+                uploadTraceLog(openMsg, cmd, retCode, retMsg);
+            }catch (Exception e){
+                logger.warn("uploadTraceLog failed in MessageTransferTask",e);
             }
         }
     }
@@ -127,6 +142,25 @@ public class MessageTransferTask extends AbstractTask {
             default:
                 return cmd;
         }
+    }
+
+    private void uploadTraceLog(Message openMessage, Command cmd, int retCode, String retMsg) throws Exception {
+        if (openMessage == null) {
+            logger.error("Cannot upload trace log, openMessage cannot be null|user={}", session.getClient());
+            return;
+        }
+        LogPointType logPointType;
+        if (cmd.equals(Command.ASYNC_MESSAGE_TO_SERVER) || cmd.equals(Command.BROADCAST_MESSAGE_TO_SERVER)) {
+            logPointType = LogPointType.LOG_RSP;
+        } else if (cmd.equals(Command.REQUEST_TO_SERVER)) {
+            logPointType = LogPointType.LOG_EVENTMESH_REQ_SEND;
+        } else {
+            logPointType = LogPointType.LOG_REQ;
+        }
+
+        Properties extProperties = new Properties();
+        extProperties.put("subsystem", session.getClient().getSubsystem());
+        Trace.uploadTraceLog(logPointType, openMessage, retCode, retMsg, extProperties);
     }
 
     protected SendCallback createSendCallback(Command replyCmd, long taskExecuteTime, EventMeshMessage eventMeshMessage) {
