@@ -17,7 +17,7 @@
 
 package org.apache.eventmesh.runtime.boot;
 
-import org.apache.eventmesh.runtime.Acl;
+import org.apache.eventmesh.runtime.acl.Acl;
 import org.apache.eventmesh.runtime.common.ServiceState;
 import org.apache.eventmesh.runtime.configuration.EventMeshHTTPConfiguration;
 import org.apache.eventmesh.runtime.configuration.EventMeshTCPConfiguration;
