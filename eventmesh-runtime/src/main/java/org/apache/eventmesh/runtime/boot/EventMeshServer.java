@@ -17,6 +17,7 @@
 
 package org.apache.eventmesh.runtime.boot;
 
+import org.apache.eventmesh.runtime.Acl;
 import org.apache.eventmesh.runtime.common.ServiceState;
 import org.apache.eventmesh.runtime.configuration.EventMeshHTTPConfiguration;
 import org.apache.eventmesh.runtime.configuration.EventMeshTCPConfiguration;
@@ -41,14 +42,20 @@ public class EventMeshServer {
 
     private Trace trace;
 
+    private Acl acl;
+
     public EventMeshServer(EventMeshHTTPConfiguration eventMeshHttpConfiguration,
                            EventMeshTCPConfiguration eventMeshTCPConfiguration) {
         this.eventMeshHttpConfiguration = eventMeshHttpConfiguration;
         this.eventMeshTCPConfiguration = eventMeshTCPConfiguration;
         this.trace = new Trace();
+        this.acl = new Acl();
     }
 
     public void init() throws Exception {
+        if(eventMeshHttpConfiguration.eventMeshServerAclEnable){
+            acl.init();
+        }
 
         trace.init();
 
@@ -67,6 +74,10 @@ public class EventMeshServer {
     }
 
     public void start() throws Exception {
+        if(eventMeshHttpConfiguration.eventMeshServerAclEnable){
+            acl.start();
+        }
+
         trace.start();
 
         eventMeshHTTPServer.start();
@@ -83,6 +94,10 @@ public class EventMeshServer {
         eventMeshHTTPServer.shutdown();
         if (eventMeshTCPConfiguration != null && eventMeshTCPConfiguration.eventMeshTcpServerEnabled) {
             eventMeshTCPServer.shutdown();
+        }
+
+        if(eventMeshHttpConfiguration.eventMeshServerAclEnable){
+            acl.shutdown();
         }
 
         trace.shutdown();

@@ -60,6 +60,10 @@
             <AppenderRef ref="console"/>
         </AsyncLogger>
 
+        <AsyncLogger name="acl" level="debug" additivity="false" includeLocation="true">
+            <AppenderRef ref="console"/>
+        </AsyncLogger>
+
         <AsyncLogger name="registry" level="debug" additivity="false" includeLocation="true">
             <AppenderRef ref="console"/>
         </AsyncLogger>
