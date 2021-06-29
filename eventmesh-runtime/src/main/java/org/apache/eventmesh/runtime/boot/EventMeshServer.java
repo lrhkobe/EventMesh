@@ -21,6 +21,7 @@ import org.apache.eventmesh.runtime.acl.Acl;
 import org.apache.eventmesh.runtime.common.ServiceState;
 import org.apache.eventmesh.runtime.configuration.EventMeshHTTPConfiguration;
 import org.apache.eventmesh.runtime.configuration.EventMeshTCPConfiguration;
+import org.apache.eventmesh.runtime.connector.ConnectorResource;
 import org.apache.eventmesh.runtime.constants.EventMeshConstants;
 import org.apache.eventmesh.runtime.trace.Trace;
 import org.slf4j.Logger;
@@ -44,15 +45,20 @@ public class EventMeshServer {
 
     private Acl acl;
 
+    private ConnectorResource connectorResource;
+
     public EventMeshServer(EventMeshHTTPConfiguration eventMeshHttpConfiguration,
                            EventMeshTCPConfiguration eventMeshTCPConfiguration) {
         this.eventMeshHttpConfiguration = eventMeshHttpConfiguration;
         this.eventMeshTCPConfiguration = eventMeshTCPConfiguration;
         this.trace = new Trace();
         this.acl = new Acl();
+        this.connectorResource = new ConnectorResource();
     }
 
     public void init() throws Exception {
+        connectorResource.init();
+
         if(eventMeshHttpConfiguration.eventMeshServerAclEnable){
             acl.init();
         }
@@ -95,6 +101,8 @@ public class EventMeshServer {
         if (eventMeshTCPConfiguration != null && eventMeshTCPConfiguration.eventMeshTcpServerEnabled) {
             eventMeshTCPServer.shutdown();
         }
+
+        connectorResource.close();
 
         if(eventMeshHttpConfiguration.eventMeshServerAclEnable){
             acl.shutdown();
