@@ -135,6 +135,8 @@ public class ClientSessionGroupMapping {
         //remove session from sessionTable
         sessionTable.remove(addr);
 
+        //report to registry
+        reportToRegistry("closeSesion");
         sessionLogger.info("session|close|succeed|user={}", session.getClient());
     }
 
@@ -221,6 +223,9 @@ public class ClientSessionGroupMapping {
             throw new Exception("addGroupProducerSession fail");
         }
         session.setSessionState(SessionState.RUNNING);
+
+        //report to registry
+        reportToRegistry("addGroupProducerSession");
     }
 
     private void initClientGroupConsumser(ClientGroupWrapper cgw) throws Exception {
@@ -257,6 +262,9 @@ public class ClientSessionGroupMapping {
                 cgw.startClientGroupBroadcastConsumer();
             }
             session.setSessionState(SessionState.RUNNING);
+
+            //report to registry
+            reportToRegistry("addGroupConsumerSession");
         }
     }
 
@@ -439,5 +447,29 @@ public class ClientSessionGroupMapping {
         }
 
         return result;
+    }
+
+    public Map<String, Map<String, Integer>> prepareProxyClientDistributionData(){
+        Map<String, Map<String, Integer>> result = null;
+
+        if(!clientGroupMap.isEmpty()){
+            result = new HashMap<>();
+            for(Map.Entry<String, ClientGroupWrapper> entry : clientGroupMap.entrySet()){
+                Map<String, Integer> map = new HashMap();
+                map.put(EventMeshConstants.PURPOSE_SUB,entry.getValue().getGroupConsumerSessions().size());
+                map.put(EventMeshConstants.PURPOSE_PUB,entry.getValue().getGroupProducerSessions().size());
+                result.put(entry.getKey(), map);
+            }
+        }
+
+        return result;
+    }
+
+    private void reportToRegistry(String callFrom){
+        logger.info("register from {}", callFrom);
+        boolean flag = eventMeshTCPServer.registerToRegistry();
+        if(!flag){
+            logger.warn("register fail|{}", callFrom);
+        }
     }
 }

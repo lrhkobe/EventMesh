@@ -17,10 +17,7 @@
 
 package org.apache.eventmesh.runtime.boot;
 
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.*;
 
 import com.google.common.util.concurrent.RateLimiter;
 
@@ -32,16 +29,22 @@ import io.netty.handler.timeout.IdleStateHandler;
 import io.netty.handler.traffic.ChannelTrafficShapingHandler;
 import io.netty.handler.traffic.GlobalTrafficShapingHandler;
 
+import org.apache.eventmesh.api.registry.dto.EventMeshRegisterDTO;
+import org.apache.eventmesh.api.registry.dto.EventMeshUnRegisterDTO;
+import org.apache.eventmesh.common.EventMeshException;
+import org.apache.eventmesh.common.IPUtil;
 import org.apache.eventmesh.common.ThreadPoolFactory;
 import org.apache.eventmesh.common.protocol.tcp.codec.Codec;
 import org.apache.eventmesh.runtime.admin.controller.ClientManageController;
 import org.apache.eventmesh.runtime.configuration.EventMeshTCPConfiguration;
+import org.apache.eventmesh.runtime.constants.EventMeshConstants;
 import org.apache.eventmesh.runtime.core.protocol.tcp.client.EventMeshTcpConnectionHandler;
 import org.apache.eventmesh.runtime.core.protocol.tcp.client.EventMeshTcpExceptionHandler;
 import org.apache.eventmesh.runtime.core.protocol.tcp.client.EventMeshTcpMessageDispatcher;
 import org.apache.eventmesh.runtime.core.protocol.tcp.client.group.ClientSessionGroupMapping;
 import org.apache.eventmesh.runtime.core.protocol.tcp.client.session.push.retry.EventMeshTcpRetryer;
 import org.apache.eventmesh.runtime.metrics.tcp.EventMeshTcpMonitor;
+import org.apache.eventmesh.runtime.registry.Registry;
 import org.apache.eventmesh.runtime.util.EventMeshThreadFactoryImpl;
 
 public class EventMeshTCPServer extends AbstractRemotingServer {
@@ -110,11 +113,14 @@ public class EventMeshTCPServer extends AbstractRemotingServer {
 
     private RateLimiter rateLimiter;
 
+    private Registry registry;
+
     public EventMeshTCPServer(EventMeshServer eventMeshServer,
-                              EventMeshTCPConfiguration eventMeshTCPConfiguration) {
+                              EventMeshTCPConfiguration eventMeshTCPConfiguration, Registry registry) {
         super();
         this.eventMeshServer = eventMeshServer;
         this.eventMeshTCPConfiguration = eventMeshTCPConfiguration;
+        this.registry = registry;
     }
 
     private void startServer() throws Exception {
@@ -204,6 +210,8 @@ public class EventMeshTCPServer extends AbstractRemotingServer {
 
         clientManageController.start();
 
+        selfRegisterToRegistry();
+
         logger.info("--------------------------EventMeshTCPServer Started");
     }
 
@@ -213,6 +221,8 @@ public class EventMeshTCPServer extends AbstractRemotingServer {
             bossGroup.shutdownGracefully();
             logger.info("shutdown bossGroup, no client is allowed to connect access server");
         }
+
+        selfUnRegisterToRegistry();
 
         clientSessionGroupMapping.shutdown();
         try {
@@ -238,6 +248,56 @@ public class EventMeshTCPServer extends AbstractRemotingServer {
 
         shutdownThreadPool();
         logger.info("--------------------------EventMeshTCPServer Shutdown");
+    }
+
+    private void selfRegisterToRegistry() throws Exception {
+
+        boolean registerResult = registerToRegistry();
+        if (!registerResult) {
+            throw new EventMeshException("eventMesh fail to register");
+        }
+
+        tcpRegisterTask = scheduler.scheduleAtFixedRate(() -> {
+            try {
+                boolean heartbeatResult = registerToRegistry();
+                if (!heartbeatResult) {
+                    logger.error("selfRegisterToRegistry fail");
+                }
+            } catch (Exception ex) {
+                logger.error("selfRegisterToRegistry fail", ex);
+            }
+        }, eventMeshTCPConfiguration.eventMeshRegisterIntervalInMills, eventMeshTCPConfiguration.eventMeshRegisterIntervalInMills, TimeUnit.MILLISECONDS);
+    }
+
+    public boolean registerToRegistry() {
+        boolean registerResult = false;
+        try{
+            String endPoints = IPUtil.getLocalAddress()
+                    + EventMeshConstants.IP_PORT_SEPARATOR + eventMeshTCPConfiguration.eventMeshTcpServerPort;
+            EventMeshRegisterDTO self = new EventMeshRegisterDTO();
+            self.setEventMeshClusterName(eventMeshTCPConfiguration.eventMeshCluster);
+            self.setEventMeshName(eventMeshTCPConfiguration.eventMeshName);
+            self.setEndPoint(endPoints);
+            self.setEventMeshInstanceNumMap(clientSessionGroupMapping.prepareProxyClientDistributionData());
+            registerResult = registry.register(self);
+        }catch (Exception e){
+            logger.warn("eventMesh register to registry failed", e);
+        }
+
+        return registerResult;
+    }
+
+    private void selfUnRegisterToRegistry() throws Exception {
+        EventMeshUnRegisterDTO eventMeshUnRegisterDTO = new EventMeshUnRegisterDTO();
+        eventMeshUnRegisterDTO.setEventMeshClusterName(eventMeshTCPConfiguration.eventMeshCluster);
+        eventMeshUnRegisterDTO.setEventMeshName(eventMeshTCPConfiguration.eventMeshName);
+        boolean registerResult = registry.unRegister(eventMeshUnRegisterDTO);
+        if (!registerResult) {
+            throw new EventMeshException("eventMesh fail to unRegister");
+        }
+
+        //cancel task
+        tcpRegisterTask.cancel(true);
     }
 
     private void initThreadPool() throws Exception {
@@ -295,5 +355,9 @@ public class EventMeshTCPServer extends AbstractRemotingServer {
 
     public EventMeshTCPConfiguration getEventMeshTCPConfiguration() {
         return eventMeshTCPConfiguration;
+    }
+
+    public Registry getRegistry() {
+        return registry;
     }
 }
